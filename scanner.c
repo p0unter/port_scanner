@@ -6,7 +6,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <sys/time.h> // timeout
+#include <sys/time.h>
 
 #define GREEN     "\033[32m"
 #define RED       "\033[31m"
@@ -17,7 +17,7 @@
 
 #define APP_VERSION "v0.1 Alpha"
 
-int scan_port(char* target_ip, int port) {
+int scan_port(char* target_ip, int port, char* banner, size_t banner_size) {
     int sock;
     struct sockaddr_in target;
 
@@ -36,10 +36,23 @@ int scan_port(char* target_ip, int port) {
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
-    int result = connect(sock, (struct sockaddr*)&target, sizeof(target));
+    if (connect(sock, (struct sockaddr*)&target, sizeof(target)) != 0) {
+        close(sock);
+        return 0;
+    }
+
+    ssize_t len = recv(sock, banner, banner_size - 1, 0);
+    if (len > 0) {
+        banner[len] = '\0'; 
+    } else {
+        banner[0] = '\0';
+    }
+
     close(sock);
-    return (result == 0) ? 1 : 0;
+    return 1;
 }
+
+char* port_controller(int port);
 
 int main(int argc, char *argv[]) {
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
@@ -47,8 +60,8 @@ int main(int argc, char *argv[]) {
         printf("Copyright 2025 " BOLD "Pounter" RESET ".\n" UNDERLINE "VERSION\t" RESET YELLOW " [%s]\n" RESET, APP_VERSION);
         printf("- - - - - - -\n");
         exit(EXIT_SUCCESS);
-    } else if (argc < 3) {
-        printf(BOLD "\nUsage:" RESET " %s <" RESET GREEN "Target IP" RESET "> <" GREEN "Start Port (Default: 1)" RESET "> <" GREEN "End Port (Default: 65535)" RESET "> <" GREEN "Show close ports (Optional): -y" RESET ">\n\n", argv[0]);
+    } else if (argc < 2) {
+        printf(BOLD "\nUsage:" RESET " %s <" RESET GREEN "Target IP" RESET "> [<" GREEN "Start Port" RESET "> <" GREEN "End Port" RESET ">] [<" GREEN "-y" RESET ">]\n\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
@@ -59,12 +72,21 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    int start_port = 1, end_port = 65535;
-    if (argc > 2 && argv[2][0] != '\0') {
+    int start_port = 1;
+    int end_port = 65535;
+    int show_closed = 0;
+
+    if (argc >= 4) {
         start_port = atoi(argv[2]);
-    }
-    if (argc > 3 && argv[3][0] != '\0') {
         end_port = atoi(argv[3]);
+
+        if (argc >= 5 && strcmp(argv[4], "-y") == 0) {
+            show_closed = 1;
+        }
+    } else if (argc == 3) {
+        if (strcmp(argv[2], "-y") == 0) {
+            show_closed = 1;
+        }
     }
 
     if (start_port < 1 || end_port > 65535 || start_port > end_port) {
@@ -72,16 +94,15 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    int show_closed = 0;
-    if (argc > 4 && strcmp(argv[4], "-y") == 0) {
-        show_closed = 1;
-    }
-
     printf(YELLOW BOLD "[SM]" RESET " Port: " GREEN "%d" RESET "-" GREEN "%d\n" RESET, start_port, end_port);
 
     for (int port = start_port; port <= end_port; port++) {
-        if (scan_port(target_ip, port)) {
-            printf(GREEN "[OP]---" RESET "%d\n", port);
+        char banner[1024];
+        if (scan_port(target_ip, port, banner, sizeof(banner))) {
+            if (strlen(banner) == 0) {
+                snprintf(banner, sizeof(banner), "%s", port_controller(port));
+            }
+            printf(GREEN "[OP]---" RESET "%d\t%s\n", port, banner);
         } else if (show_closed) {
             printf(RED "[CL]---" RESET "%d\n", port);
         }
@@ -89,4 +110,23 @@ int main(int argc, char *argv[]) {
 
     printf(YELLOW BOLD "\n[SM]" RESET " Scanning Completed.\n");
     return 0;
+}
+
+char* port_controller(int port) {
+    switch (port) {
+        case 21:  return "FTP";
+        case 22:  return "SSH";
+        case 23:  return "Telnet";
+        case 25:  return "SMTP";
+        case 53:  return "DNS";
+        case 80:  return "HTTP";
+        case 110: return "POP3";
+        case 143: return "IMAP";
+        case 443: return "HTTPS";
+        case 3306: return "MySQL";
+        case 3389: return "RDP";
+        case 5900: return "VNC";
+        case 8080: return "HTTP Alt";
+        default:  return "Other";
+    }
 }
